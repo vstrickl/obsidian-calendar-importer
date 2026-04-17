@@ -1,18 +1,18 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import CalendarImporterPlugin from "./main";
 
-export interface MyPluginSettings {
+export interface CalendarImporterSettings {
 	mySetting: string;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
+export const DEFAULT_SETTINGS: CalendarImporterSettings = {
 	mySetting: 'default'
 }
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+export class CalendarImporterSettingTab extends PluginSettingTab {
+	plugin: CalendarImporterPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: CalendarImporterPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
