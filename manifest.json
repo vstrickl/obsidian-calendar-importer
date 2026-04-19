@@ -6,5 +6,5 @@
 	"description": "Import Google Calendar events into cycle-phase-organized Markdown schedule files.",
 	"author": "Vonique Stricklen",
 	"authorUrl": "https://github.com/vstrickl",
-	"isDesktopOnly": true
+	"isDesktopOnly": false
 }

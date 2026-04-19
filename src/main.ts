@@ -1,12 +1,27 @@
-import { App, Modal, Notice, Plugin, Setting } from 'obsidian';
+import { App, Modal, Notice, ObsidianProtocolData, Platform, Plugin, Setting } from 'obsidian';
 import { DEFAULT_SETTINGS, CalendarImporterSettings, CalendarImporterSettingTab } from './settings';
 import { runSchedule, RunOptions } from './runner';
 
 export default class CalendarImporterPlugin extends Plugin {
     settings!: CalendarImporterSettings;
 
+    // Resolves the pending mobile OAuth promise when the protocol handler fires
+    mobileAuthCodeResolver?: (code: string) => void;
+
     async onload() {
         await this.loadSettings();
+
+        // Mobile OAuth callback — obsidian://calendar-importer-auth?code=...
+        this.registerObsidianProtocolHandler(
+            'calendar-importer-auth',
+            (params: ObsidianProtocolData) => {
+                const code = params['code'];
+                if (code && this.mobileAuthCodeResolver) {
+                    this.mobileAuthCodeResolver(code);
+                    this.mobileAuthCodeResolver = undefined;
+                }
+            },
+        );
 
         this.addRibbonIcon('calendar-days', 'Import Calendar Schedule', () => {
             this.openImportModal();
@@ -24,7 +39,11 @@ export default class CalendarImporterPlugin extends Plugin {
     onunload() {}
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<CalendarImporterSettings>);
+        this.settings = Object.assign(
+            {},
+            DEFAULT_SETTINGS,
+            await this.loadData() as Partial<CalendarImporterSettings>,
+        );
     }
 
     async saveSettings() {
@@ -37,6 +56,18 @@ export default class CalendarImporterPlugin extends Plugin {
             return;
         }
         new ImportModal(this.app, this).open();
+    }
+
+    // Returns a Promise that resolves when mobile OAuth redirects back to Obsidian.
+    waitForMobileCode(): Promise<string> {
+        return new Promise<string>((resolve, reject) => {
+            this.mobileAuthCodeResolver = resolve;
+            const timeout = Platform.isMobile ? 300_000 : 120_000;
+            window.setTimeout(() => {
+                this.mobileAuthCodeResolver = undefined;
+                reject(new Error('OAuth timeout: switch back to Obsidian after authenticating'));
+            }, timeout);
+        });
     }
 }
 
@@ -54,13 +85,12 @@ class ImportModal extends Modal {
 
         const s = this.plugin.settings;
 
-        // Local state (pre-filled from settings defaults)
-        let startDate    = '';
-        let endDate      = '';
-        let phase        = s.defaultCyclePhase;
-        let outputMode   = s.defaultOutputMode;
-        let mondayCd     = s.defaultMondayCycleDay;
-        let cycleLength  = s.defaultCycleLength;
+        let startDate   = '';
+        let endDate     = '';
+        let phase       = s.defaultCyclePhase;
+        let outputMode  = s.defaultOutputMode;
+        let mondayCd    = s.defaultMondayCycleDay;
+        let cycleLength = s.defaultCycleLength;
 
         new Setting(contentEl)
             .setName('Start date')
@@ -130,22 +160,16 @@ class ImportModal extends Modal {
                     btn.setDisabled(true).setButtonText('Importing…');
                     this.close();
 
-                    const opts: RunOptions = {
-                        startDate,
-                        endDate,
-                        phase,
-                        outputMode,
-                        mondayCycleDay: mondayCd,
-                        cycleLength,
-                    };
-
                     try {
-                        const result = await runSchedule(this.app, this.plugin, opts);
-                        if (result.noEventDays.length > 0) {
-                            new Notice(`Import complete. No events on: ${result.noEventDays.join(', ')}`);
-                        } else {
-                            new Notice('Import complete.');
-                        }
+                        const result = await runSchedule(this.app, this.plugin, {
+                            startDate, endDate, phase, outputMode,
+                            mondayCycleDay: mondayCd, cycleLength,
+                        } as RunOptions);
+                        new Notice(
+                            result.noEventDays.length > 0
+                                ? `Import complete. No events on: ${result.noEventDays.join(', ')}`
+                                : 'Import complete.',
+                        );
                     } catch (err) {
                         new Notice(`Import failed: ${(err as Error).message}`);
                     }

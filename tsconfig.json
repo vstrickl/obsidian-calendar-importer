@@ -19,9 +19,14 @@
 		"lib": [
 			"DOM",
 			"ES2020"
-		]
+		],
+		"types": ["node"]
 	},
 	"include": [
 		"src/**/*.ts"
+	],
+	"exclude": [
+		"src/__mocks__/**",
+		"src/__tests__/**"
 	]
 }

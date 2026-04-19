@@ -1,6 +1,12 @@
-import { App, Modal, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import CalendarImporterPlugin from './main';
-import { authenticateGoogle } from './auth';
+import {
+    authenticateGoogleDesktop,
+    authenticateGoogleMobile,
+    DESKTOP_REDIRECT_URI,
+    MOBILE_REDIRECT_URI,
+    TokenData,
+} from './auth';
 import { listCalendars, CalendarInfo } from './calendar';
 
 export interface CalendarImporterSettings {
@@ -12,12 +18,12 @@ export interface CalendarImporterSettings {
     tokenExpiresAt:  number;
 
     // Output
-    outputDir:       string;  // relative to vault root, e.g. "schedule/by_cycle"
+    outputDir: string;
 
     // Calendar selection (comma-separated names or IDs)
     calendarSelection: string;
 
-    // Cycle defaults (pre-fill the import modal)
+    // Cycle defaults
     defaultCycleLength:    number;
     defaultMondayCycleDay: number;
     defaultCyclePhase:     string;
@@ -53,6 +59,23 @@ export class CalendarImporterSettingTab extends PluginSettingTab {
         // ── Google OAuth ────────────────────────────────────────────────────
         containerEl.createEl('h2', { text: 'Google Account' });
 
+        const redirectUri = Platform.isMobile ? MOBILE_REDIRECT_URI : DESKTOP_REDIRECT_URI;
+
+        // Context-sensitive setup instructions
+        const instructions = containerEl.createEl('div', { cls: 'setting-item-description' });
+        if (Platform.isMobile) {
+            instructions.innerHTML =
+                '<strong>Mobile setup:</strong> In Google Cloud Console, create an ' +
+                '<strong>OAuth 2.0 Web application</strong> credential and add this ' +
+                `as an authorized redirect URI:<br><code>${MOBILE_REDIRECT_URI}</code>`;
+        } else {
+            instructions.innerHTML =
+                '<strong>Desktop setup:</strong> In Google Cloud Console, create an ' +
+                '<strong>OAuth 2.0 Desktop app</strong> credential. ' +
+                'Loopback redirects (<code>127.0.0.1</code>) are automatically allowed ' +
+                'for that client type — no manual URI entry needed.';
+        }
+
         new Setting(containerEl)
             .setName('OAuth Client ID')
             .setDesc('From Google Cloud Console → APIs & Services → Credentials.')
@@ -75,15 +98,13 @@ export class CalendarImporterSettingTab extends PluginSettingTab {
                     });
             });
 
-        const authStatus = this.plugin.settings.accessToken
-            ? '✅ Connected'
-            : '❌ Not connected';
+        const authStatus = this.plugin.settings.accessToken ? '✅ Connected' : '❌ Not connected';
 
         new Setting(containerEl)
             .setName('Connection status')
             .setDesc(authStatus)
             .addButton(btn => btn
-                .setButtonText('Connect Google Account')
+                .setButtonText(Platform.isMobile ? 'Connect (opens browser)' : 'Connect Google Account')
                 .setCta()
                 .onClick(async () => {
                     const { clientId, clientSecret } = this.plugin.settings;
@@ -92,10 +113,25 @@ export class CalendarImporterSettingTab extends PluginSettingTab {
                         return;
                     }
                     try {
-                        btn.setDisabled(true).setButtonText('Waiting for browser…');
-                        const tokens = await authenticateGoogle(clientId, clientSecret);
-                        this.plugin.settings.accessToken   = tokens.access_token;
-                        this.plugin.settings.refreshToken  = tokens.refresh_token ?? '';
+                        btn.setDisabled(true).setButtonText(
+                            Platform.isMobile
+                                ? 'Switch back to Obsidian after signing in…'
+                                : 'Waiting for browser…',
+                        );
+
+                        let tokens: TokenData;
+                        if (Platform.isMobile) {
+                            tokens = await authenticateGoogleMobile(
+                                clientId,
+                                clientSecret,
+                                () => this.plugin.waitForMobileCode(),
+                            );
+                        } else {
+                            tokens = await authenticateGoogleDesktop(clientId, clientSecret);
+                        }
+
+                        this.plugin.settings.accessToken    = tokens.access_token;
+                        this.plugin.settings.refreshToken   = tokens.refresh_token ?? '';
                         this.plugin.settings.tokenExpiresAt = tokens.expires_at ?? 0;
                         await this.plugin.saveSettings();
                         new Notice('Google account connected!');
@@ -115,6 +151,11 @@ export class CalendarImporterSettingTab extends PluginSettingTab {
                     new Notice('Disconnected from Google.');
                     this.display();
                 }));
+
+        // Show the active redirect URI so the user can verify it's registered
+        new Setting(containerEl)
+            .setName('Active redirect URI')
+            .setDesc(redirectUri);
 
         // ── Output ──────────────────────────────────────────────────────────
         containerEl.createEl('h2', { text: 'Output' });
@@ -150,20 +191,19 @@ export class CalendarImporterSettingTab extends PluginSettingTab {
             .addButton(btn => btn
                 .setButtonText('Browse calendars')
                 .onClick(async () => {
-                    const { accessToken } = this.plugin.settings;
-                    if (!accessToken) {
+                    if (!this.plugin.settings.accessToken) {
                         new Notice('Connect your Google account first.');
                         return;
                     }
                     try {
-                        const cals = await listCalendars(accessToken);
+                        const cals = await listCalendars(this.plugin.settings.accessToken);
                         new CalendarListModal(this.app, cals).open();
                     } catch (err) {
                         new Notice(`Failed to fetch calendars: ${(err as Error).message}`);
                     }
                 }));
 
-        // ── Cycle defaults ────────────────────────────────────────────────
+        // ── Cycle defaults ──────────────────────────────────────────────────
         containerEl.createEl('h2', { text: 'Cycle defaults' });
 
         new Setting(containerEl)
@@ -226,11 +266,9 @@ class CalendarListModal extends Modal {
     }
 
     onOpen() {
-        const { contentEl } = this;
-        contentEl.createEl('h2', { text: 'Available Calendars' });
-        contentEl.createEl('p', { text: 'Copy the names or IDs you want into Calendar Selection.' });
-
-        const ul = contentEl.createEl('ul');
+        this.contentEl.createEl('h2', { text: 'Available Calendars' });
+        this.contentEl.createEl('p', { text: 'Copy the names or IDs you want into Calendar Selection.' });
+        const ul = this.contentEl.createEl('ul');
         for (const cal of this.calendars) {
             ul.createEl('li', { text: `${cal.summary}  (${cal.id})` });
         }

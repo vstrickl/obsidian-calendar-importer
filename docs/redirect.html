@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendar Importer Sync – Redirecting…</title>
+  <style>
+    body { font-family: sans-serif; display: flex; align-items: center; justify-content: center;
+           min-height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4; }
+    .card { text-align: center; padding: 2rem; border-radius: 12px; background: #313244;
+            max-width: 400px; }
+    .icon { font-size: 3rem; margin-bottom: 1rem; }
+    .error { color: #f38ba8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon" id="icon">⏳</div>
+    <h2 id="heading">Redirecting to Obsidian…</h2>
+    <p id="message">Opening Obsidian with your authentication code. You can close this tab.</p>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code  = params.get('code');
+    const error = params.get('error');
+
+    if (code) {
+      // Hand the code off to the plugin via the obsidian:// URI scheme
+      window.location.href =
+        'obsidian://calendar-importer-auth?code=' + encodeURIComponent(code);
+    } else {
+      document.getElementById('icon').textContent = '❌';
+      document.getElementById('heading').textContent = 'Authentication failed';
+      document.getElementById('heading').className = 'error';
+      document.getElementById('message').textContent =
+        'Error: ' + (error || 'No code returned by Google.');
+    }
+  </script>
+</body>
+</html>
